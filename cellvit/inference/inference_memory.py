@@ -11,6 +11,9 @@
 # Institute for Artifical Intelligence in Medicine,
 # University Medicine Essen
 
+import sys
+sys.modules["cucim"] = None
+
 from pathlib import Path
 from typing import Union
 
@@ -26,7 +29,8 @@ from cellvit.inference.postprocessing_cupy import (
     BatchPoolingActor,
     DetectionCellPostProcessorCupy,
 )
-from pathopatch.patch_extraction.dataset import (
+# from pathopatch.patch_extraction.dataset import (
+from cellvit.utils.dataset import (
     LivePatchWSIDataloader,
     LivePatchWSIDataset,
     LivePatchWSIConfig,
@@ -34,6 +38,7 @@ from pathopatch.patch_extraction.dataset import (
 import snappy
 from cellvit.inference.wsi_meta import load_wsi_meta
 
+import openslide
 
 class CellViTInferenceMemory(CellViTInference):
     def __init__(
@@ -114,6 +119,9 @@ class CellViTInferenceMemory(CellViTInference):
             logger=self.logger,
             transforms=self.inference_transforms,
         )
+        # Retrieve the base coordinates to correctly calculate the geojson coordinates
+        x_basis = int(wsi_inference_dataset.slide_openslide.properties[openslide.PROPERTY_NAME_BOUNDS_X])
+        y_basis = int(wsi_inference_dataset.slide_openslide.properties[openslide.PROPERTY_NAME_BOUNDS_Y])
         wsi_inference_dataloader = LivePatchWSIDataloader(
             dataset=wsi_inference_dataset, batch_size=self.batch_size, shuffle=False
         )
@@ -215,6 +223,7 @@ class CellViTInferenceMemory(CellViTInference):
             <= wsi.metadata["target_patch_mpp"]
             <= wsi.metadata["base_mpp"] + 0.035
         ):
+            self.logger.warning("Realignment applied")
             cell_dict_wsi, cell_dict_detection = self._reallign_grid(
                 cell_dict_wsi=cell_dict_wsi,
                 cell_dict_detection=cell_dict_detection,
@@ -224,7 +233,7 @@ class CellViTInferenceMemory(CellViTInference):
 
         # saving/storing
         output_wsi_name = wsi_path.name.split(".")[0]
-        cell_dict_wsi = {
+        cell_dict_wsi_o = {
             "wsi_metadata": wsi.metadata,
             "type_map": self.label_map,
             "cells": cell_dict_wsi,
@@ -233,17 +242,28 @@ class CellViTInferenceMemory(CellViTInference):
             with open(
                 str(self.outdir / f"{output_wsi_name}_cells.json.snappy"), "wb"
             ) as outfile:
-                compressed_data = snappy.compress(ujson.dumps(cell_dict_wsi, outfile))
+                compressed_data = snappy.compress(ujson.dumps(cell_dict_wsi_o, outfile))
                 outfile.write(compressed_data)
         else:
             with open(
                 str(self.outdir / f"{output_wsi_name}_cells.json"), "w"
             ) as outfile:
-                ujson.dump(cell_dict_wsi, outfile)
+                ujson.dump(cell_dict_wsi_o, outfile)
 
         if self.geojson:
+            cell_dict_wsi, cell_dict_detection = self._correct_grid_geojson(
+                cell_dict_wsi=cell_dict_wsi,
+                cell_dict_detection=cell_dict_detection,
+                x=x_basis,
+                y=y_basis,
+            )
+            cell_dict_wsi_o = {
+                "wsi_metadata": wsi.metadata,
+                "type_map": self.label_map,
+                "cells": cell_dict_wsi,
+            }
             self.logger.info("Converting segmentation to geojson")
-            geojson_list = self._convert_json_geojson(cell_dict_wsi["cells"], True)
+            geojson_list = self._convert_json_geojson(cell_dict_wsi_o["cells"], True)
             if self.compression:
                 with open(
                     str(self.outdir / f"{output_wsi_name}_cells.geojson.snappy"), "wb"
@@ -312,7 +332,7 @@ class CellViTInferenceMemory(CellViTInference):
             torch.save(graph, str(self.outdir / f"{output_wsi_name}_cells.pt"))
 
         # final output message
-        cell_stats_df = pd.DataFrame(cell_dict_wsi["cells"])
+        cell_stats_df = pd.DataFrame(cell_dict_wsi_o["cells"])
         cell_stats = dict(cell_stats_df.value_counts("type"))
         verbose_stats = {self.label_map[k]: v for k, v in cell_stats.items()}
         self.logger.info(f"Finished with cell detection for WSI {output_wsi_name}")

@@ -45,6 +45,7 @@ from cellvit.inference.postprocessing_cupy import (
 from cellvit.models.cell_segmentation.cellvit import CellViT
 from cellvit.models.cell_segmentation.cellvit_256 import CellViT256
 from cellvit.models.cell_segmentation.cellvit_sam import CellViTSAM
+from cellvit.models.cell_segmentation.cellvit_virchow import CellViTVirchow
 from cellvit.models.cell_segmentation.cellvit_uni import CellViTUNI
 from cellvit.utils.logger import Logger
 from cellvit.utils.tools import unflatten_dict
@@ -289,7 +290,7 @@ class CellViTInference:
             self.classifier = model
 
     def _get_model(
-        self, model_type: Literal["CellViT", "CellViT256", "CellViTSAM", "CellViTUNI"]
+        self, model_type: Literal["CellViT", "CellViT256", "CellViTSAM", "CellViTUNI", "CellViTVirchow"]
     ) -> Union[CellViT, CellViT256, CellViTSAM, CellViTUNI]:
         """Return the trained model for inference
 
@@ -300,7 +301,7 @@ class CellViTInference:
         Returns:
             Union[CellViT, CellViT256, CellViTSAM, CellViTUNI]: Model
         """
-        implemented_models = ["CellViT", "CellViT256", "CellViTSAM", "CellViTUNI"]
+        implemented_models = ["CellViT", "CellViT256", "CellViTSAM", "CellViTUNI", "CellViTVirchow"]
         if model_type not in implemented_models:
             raise NotImplementedError(
                 f"Unknown model type. Please select one of {implemented_models}"
@@ -335,6 +336,12 @@ class CellViTInference:
         elif model_type == "CellViTUNI":
             model = CellViTUNI(
                 model_uni_path=None,
+                num_nuclei_classes=self.run_conf["data"]["num_nuclei_classes"],
+                num_tissue_classes=self.run_conf["data"]["num_tissue_classes"],
+            )
+        elif model_type in ["CellViTVirchow"]:
+            model = CellViTVirchow(
+                model_virchow_path=None,
                 num_nuclei_classes=self.run_conf["data"]["num_nuclei_classes"],
                 num_tissue_classes=self.run_conf["data"]["num_tissue_classes"],
             )
@@ -638,6 +645,45 @@ class CellViTInference:
             cell["centroid"][1] = cell["centroid"][1] * rescaling_factor
             cell["contour"] = [
                 [round(c[0] * rescaling_factor), round(c[1] * rescaling_factor)]
+                for c in cell["contour"]
+            ]
+        return cell_dict_wsi, cell_dict_detection
+
+    def _correct_grid_geojson(
+        self,
+        cell_dict_wsi: list[dict],
+        cell_dict_detection: list[dict],
+        x: int,
+        y: int,
+    ) -> Tuple[list[dict], list[dict]]:
+        """Reallign grid if interpolation was used (including target_mpp_tolerance)
+
+        Args:
+            cell_dict_wsi (list[dict]): Input cell dict
+            cell_dict_detection (list[dict]): Input cell dict (detection)
+            rescaling_factor (float): Rescaling factor
+
+        Returns:
+            Tuple[list[dict],list[dict]]:
+                * Realligned cell dict (contours)
+                * Realligned cell dict (detection)
+        """
+        for cell in cell_dict_detection:
+            cell["bbox"][0][0] = cell["bbox"][0][0] - x
+            cell["bbox"][0][1] = cell["bbox"][0][1] - x
+            cell["bbox"][1][0] = cell["bbox"][1][0] - y
+            cell["bbox"][1][1] = cell["bbox"][1][1] - y
+            cell["centroid"][0] = cell["centroid"][0] - x
+            cell["centroid"][1] = cell["centroid"][1] - y
+        for cell in cell_dict_wsi:
+            cell["bbox"][0][0] = cell["bbox"][0][0] - x
+            cell["bbox"][0][1] = cell["bbox"][0][1] - x
+            cell["bbox"][1][0] = cell["bbox"][1][0] - y
+            cell["bbox"][1][1] = cell["bbox"][1][1] - y
+            cell["centroid"][0] = cell["centroid"][0] - x
+            cell["centroid"][1] = cell["centroid"][1] - y
+            cell["contour"] = [
+                [round(c[0] - x), round(c[1] - y)]
                 for c in cell["contour"]
             ]
         return cell_dict_wsi, cell_dict_detection

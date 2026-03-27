@@ -820,11 +820,12 @@ class LivePatchWSIDataloader:
                 metadata.append(meta)
                 masks.append(mask)
                 batch_item_count += 1
-            # if len(patches) > 1:
-            patches = [torch.tensor(f) for f in patches]
-            patches = torch.stack(patches)
-            # elif len(patches) == 1:
-            #     patches = torch.tensor(patches[0][None, ...])
+            if len(patches) == 0:
+                raise StopIteration
+            patches = torch.stack([
+                p if isinstance(p, torch.Tensor) else torch.tensor(p)
+                for p in patches
+            ])
             return patches, metadata, masks
         else:
             raise StopIteration

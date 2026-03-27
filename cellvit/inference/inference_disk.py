@@ -377,6 +377,15 @@ class CellViTInference:
                 "mixed_precision", False
             )
 
+    def get_allocated_cpus() -> int:
+        """Return the number of CPUs actually allocated to this process."""
+        try:
+            # Respects cgroups/SLURM allocations - works on Linux clusters
+            return len(os.sched_getaffinity(0))
+        except AttributeError:
+            # Fallback for macOS/Windows where sched_getaffinity isn't available
+            return os.cpu_count()
+
     def _setup_worker(self) -> None:
         """Setup the worker for inference"""
         runtime_env = {
@@ -384,9 +393,10 @@ class CellViTInference:
                 "PYTHONPATH": project_root
             }
         }
-        ray.init(num_cpus=os.cpu_count() - 2, runtime_env=runtime_env)
+        n_cpus = self.get_allocated_cpus()
+        ray.init(num_cpus=n_cpus - 2, runtime_env=runtime_env)
         # workers for loading data
-        num_workers = int(3 / 4 * os.cpu_count())
+        num_workers = int(3 / 4 * n_cpus)
         if num_workers is None:
             num_workers = 16
         num_workers = int(np.clip(num_workers, 1, 4 * self.batch_size))

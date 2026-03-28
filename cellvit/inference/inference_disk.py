@@ -377,7 +377,7 @@ class CellViTInference:
                 "mixed_precision", False
             )
 
-    def get_allocated_cpus() -> int:
+    def get_allocated_cpus(self) -> int:
         """Return the number of CPUs actually allocated to this process."""
         try:
             # Respects cgroups/SLURM allocations - works on Linux clusters

@@ -401,7 +401,12 @@ class CellViTInference:
             num_workers = 16
         num_workers = int(np.clip(num_workers, 1, 4 * self.batch_size))
         self.num_workers = num_workers
+        available_for_actors = (n_cpus - 2)
+        cpus_per_actor = 8 # TODO: check the cpu per actor calculation
+        max_actors_by_cpu = max(1, available_for_actors // cpus_per_actor)
+        self.logger.info(f"Max {max_actors_by_cpu} ray-workers with {cpus_per_actor} CPUs")
         self.ray_actors = int(np.clip(1 / 2 * self.batch_size, 4, 8))
+        self.ray_actors = min(self.ray_actors, max_actors_by_cpu)
         self.logger.info(f"Using {self.ray_actors} ray-workers")
 
     def process_wsi(
